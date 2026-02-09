@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Permisos - Real Estate Assistant</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+
+    .container {
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 500px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 16px;
+    }
+
+    p {
+      color: #a0a0a0;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .status {
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      font-weight: 500;
+    }
+
+    .status.pending {
+      background: rgba(245, 158, 11, 0.2);
+      color: #f59e0b;
+    }
+
+    .status.granted {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+    }
+
+    .status.denied {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+    }
+
+    button {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 100%;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    button:disabled {
+      background: #4a4a4a;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .success-actions {
+      display: none;
+      margin-top: 20px;
+    }
+
+    .success-actions.show {
+      display: block;
+    }
+
+    .close-btn {
+      background: rgba(255,255,255,0.1);
+      margin-top: 12px;
+    }
+
+    .close-btn:hover {
+      background: rgba(255,255,255,0.2);
+      box-shadow: none;
+    }
+
+    .instructions {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 20px;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    .instructions ol {
+      margin-left: 20px;
+      color: #a0a0a0;
+    }
+
+    .instructions li {
+      margin: 8px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">🎤</div>
+    <h1>Permiso de Micrófono</h1>
+    <p>Para capturar tu voz durante las llamadas de Google Meet, la extensión necesita acceso al micrófono.</p>
+
+    <div id="status" class="status pending">
+      Estado: Verificando...
+    </div>
+
+    <button id="requestBtn">
+      Permitir Acceso al Micrófono
+    </button>
+
+    <div id="successActions" class="success-actions">
+      <p style="color: #22c55e; margin-bottom: 16px;">
+        ¡Listo! Ahora puedes usar la extensión en Google Meet.
+      </p>
+      <button id="closeBtn" class="close-btn">Cerrar esta pestaña</button>
+    </div>
+
+    <div id="deniedInstructions" class="instructions" style="display: none;">
+      <strong style="color: #ef4444;">Permiso denegado</strong>
+      <p style="margin: 12px 0;">Para habilitar el micrófono manualmente:</p>
+      <ol>
+        <li>Haz clic en el icono de candado/info en la barra de direcciones</li>
+        <li>Busca "Micrófono" en los permisos</li>
+        <li>Cámbialo a "Permitir"</li>
+        <li>Recarga esta página</li>
+      </ol>
+    </div>
+  </div>
+
+  <script src="permissions.js"></script>
+</body>
+</html>
