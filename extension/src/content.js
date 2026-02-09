@@ -6,7 +6,8 @@ let fullTranscript = '';
 let isMinimized = false;
 let isCapturing = false;
 let serverUrl = 'ws://localhost:3001';
-let speakerNames = { 0: 'Vendedor', 1: 'Cliente', 2: 'Participante 3' };
+// Speakers se auto-detectan con IA en el backend
+let speakerNames = { 0: 'Persona 1', 1: 'Persona 2' };
 
 // Cargar config guardada al iniciar
 chrome.storage.local.get(['serverUrl'], (result) => {
@@ -48,11 +49,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'TRANSCRIPT':
-      updateTranscript(message.text, message.is_final, message.speaker);
-      // Usar el fullTranscript del servidor (formato Vendedor/Cliente)
+      // Actualizar fullTranscript del servidor (formato Vendedor/Cliente completo)
       if (message.fullTranscript) {
         fullTranscript = message.fullTranscript;
       }
+      // Renderizar transcript completo + texto interim actual
+      renderFullTranscript(message.text, message.is_final, message.speaker);
       sendResponse({ success: true });
       break;
 
@@ -1280,71 +1282,72 @@ function updateControlsUI() {
 
 let messageCount = 0;
 
-function updateTranscript(text, isFinal, speaker) {
+function renderFullTranscript(currentText, isFinal, channel) {
   if (!assistantPanel) createAssistantPanel();
 
   const container = document.getElementById('sa-transcript-content');
   if (!container) return;
 
+  // Parsear fullTranscript en lineas de "Vendedor: texto" / "Cliente: texto"
+  const lines = fullTranscript.split('\n').filter(l => l.trim());
+
+  if (lines.length === 0 && !currentText) return;
+
   // Limpiar mensaje inicial
   const empty = container.querySelector('.sa-transcript-empty');
   if (empty) empty.remove();
 
-  const speakerClass = speaker !== null && speaker !== undefined ? speaker : 'unknown';
-  const speakerName = speaker !== null && speaker !== undefined
-    ? speakerNames[speaker] || `Speaker ${speaker}`
-    : 'Hablante';
+  // Construir HTML con todas las lineas completas
+  let html = '';
+  lines.forEach(line => {
+    const match = line.match(/^(Vendedor|Cliente|Participante \d+|Canal \d+|Persona \d+|Desconocido):\s*(.+)/);
+    if (match) {
+      const role = match[1];
+      const text = match[2];
+      const isVendedor = role === 'Vendedor';
+      const avatarClass = isVendedor ? '1' : '0';
+      const initial = isVendedor ? 'V' : 'C';
+      html += `
+        <div class="sa-message">
+          <div class="sa-message-avatar sa-message-avatar-${avatarClass}">${initial}</div>
+          <div class="sa-message-content">
+            <div class="sa-message-header">
+              <span class="sa-message-name sa-message-name-${avatarClass}">${role}</span>
+            </div>
+            <div class="sa-message-bubble sa-message-bubble-${avatarClass}">${text}</div>
+          </div>
+        </div>`;
+    }
+  });
 
-  const avatarInitial = speaker !== null && speaker !== undefined
-    ? (speaker === 0 ? 'V' : speaker === 1 ? 'C' : 'P')
-    : '?';
-
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-
-  const message = document.createElement('div');
-  message.className = 'sa-message';
-
-  if (!isFinal) {
-    message.innerHTML = `
-      <div class="sa-message-avatar sa-message-avatar-${speakerClass}">${avatarInitial}</div>
-      <div class="sa-message-content">
-        <div class="sa-message-header">
-          <span class="sa-message-name sa-message-name-${speakerClass}">${speakerName}</span>
-          <span class="sa-message-time">${timeStr}</span>
+  // Agregar texto interim actual (lo que se esta hablando ahora)
+  if (currentText && !isFinal) {
+    const label = speakerNames[channel] || 'Hablante';
+    const isVendedor = channel === 1;
+    const avatarClass = isVendedor ? '1' : '0';
+    const initial = isVendedor ? 'V' : 'C';
+    html += `
+      <div class="sa-message sa-message-interim">
+        <div class="sa-message-avatar sa-message-avatar-${avatarClass}">${initial}</div>
+        <div class="sa-message-content">
+          <div class="sa-message-header">
+            <span class="sa-message-name sa-message-name-${avatarClass}">${label}</span>
+          </div>
+          <div class="sa-message-bubble sa-message-bubble-interim">${currentText}...</div>
         </div>
-        <div class="sa-message-bubble sa-message-bubble-interim">${text}...</div>
-      </div>
-    `;
-    message.classList.add('sa-message-interim');
-
-    const prevInterim = container.querySelector('.sa-message-interim');
-    if (prevInterim) prevInterim.remove();
-  } else {
-    messageCount++;
-    message.innerHTML = `
-      <div class="sa-message-avatar sa-message-avatar-${speakerClass}">${avatarInitial}</div>
-      <div class="sa-message-content">
-        <div class="sa-message-header">
-          <span class="sa-message-name sa-message-name-${speakerClass}">${speakerName}</span>
-          <span class="sa-message-time">${timeStr}</span>
-        </div>
-        <div class="sa-message-bubble sa-message-bubble-${speakerClass}">${text}</div>
-      </div>
-    `;
-
-    const badge = document.getElementById('sa-message-badge');
-    if (badge) badge.textContent = messageCount;
+      </div>`;
   }
 
-  container.appendChild(message);
+  container.innerHTML = html;
 
+  // Update badge
+  messageCount = lines.length;
+  const badge = document.getElementById('sa-message-badge');
+  if (badge) badge.textContent = messageCount;
+
+  // Auto-scroll al final
   const transcript = document.getElementById('sa-transcript');
   if (transcript) transcript.scrollTop = transcript.scrollHeight;
-
-  // Limitar mensajes (mantener ultimos 30)
-  const messages = container.querySelectorAll('.sa-message:not(.sa-message-interim)');
-  if (messages.length > 30) messages[0].remove();
 }
 
 function showRecommendations(properties) {

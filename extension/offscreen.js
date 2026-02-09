@@ -74,8 +74,8 @@ async function startCapture(streamId, serverUrl) {
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
+        echoCancellation: false,
+        noiseSuppression: false,
         autoGainControl: true
       },
       video: false
@@ -166,7 +166,7 @@ async function startCapture(streamId, serverUrl) {
     }
     log('AudioContext (proceso) state:', processContext.state);
 
-    // Crear merger para combinar fuentes
+    // Crear merger para combinar fuentes en mono
     const merger = processContext.createChannelMerger(2);
     const gainNode = processContext.createGain();
     gainNode.gain.value = 1.0;

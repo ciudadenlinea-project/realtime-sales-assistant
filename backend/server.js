@@ -77,11 +77,72 @@ wss.on('connection', (ws, req) => {
   let totalBytesReceived = 0;
   let deepgramReady = false;
   let deepgramKeepAliveInterval = null;
-  let currentUtterance = '';       // Acumula segmentos is_final hasta speech_final
-  let currentSpeaker = null;       // Speaker del utterance actual
 
-  // Nombres de speakers para el transcript
-  const speakerLabels = { 0: 'Vendedor', 1: 'Cliente', 2: 'Participante 3' };
+  // Speaker labels (diarize: Speaker 0 y 1, se detectan roles con IA)
+  const speakerLabels = { 0: 'Persona 1', 1: 'Persona 2', 2: 'Participante 3' };
+  let rolesDetected = false;
+  let roleDetectionPending = false;
+  const rawUtterances = []; // Para detección de roles con IA
+  let currentUtterance = '';
+  let currentSpeaker = null;
+
+  // Detección automática de roles con IA
+  async function triggerRoleDetection(wsConn, cId) {
+    const uniqueSpeakers = new Set(rawUtterances.map(u => u.speaker));
+    if (uniqueSpeakers.size < 2 || rawUtterances.length < 3 || roleDetectionPending) return;
+
+    roleDetectionPending = true;
+    log('🧠', `[Cliente ${cId}] Detectando roles con IA (${rawUtterances.length} utterances)...`);
+
+    try {
+      const conversationForAI = rawUtterances.map(u => `Speaker ${u.speaker}: ${u.text}`).join('\n');
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `Analiza esta conversación de venta inmobiliaria y determina quién es el VENDEDOR y quién es el CLIENTE.
+El vendedor: saluda, ofrece, presenta opciones. El cliente: expresa necesidades, pregunta, menciona presupuesto.
+Responde SOLO en JSON: {"speaker_0": "vendedor" o "cliente", "speaker_1": "vendedor" o "cliente", "confianza": "alta/media/baja"}`
+          },
+          { role: 'user', content: conversationForAI }
+        ],
+        temperature: 0.2,
+        max_tokens: 150
+      });
+
+      let content = response.choices[0].message.content;
+      content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const roles = JSON.parse(content);
+      log('🧠', `[Cliente ${cId}] Roles:`, JSON.stringify(roles));
+
+      if (roles.speaker_0 && roles.speaker_1) {
+        speakerLabels[0] = roles.speaker_0 === 'vendedor' ? 'Vendedor' : 'Cliente';
+        speakerLabels[1] = roles.speaker_1 === 'vendedor' ? 'Vendedor' : 'Cliente';
+        rolesDetected = true;
+
+        log('🧠', `[Cliente ${cId}] ✅ Speaker 0=${speakerLabels[0]}, Speaker 1=${speakerLabels[1]}`);
+
+        // Re-etiquetar transcript existente
+        transcriptBuffer = rawUtterances.map(u => {
+          const label = speakerLabels[u.speaker] || `Persona ${u.speaker + 1}`;
+          return `${label}: ${u.text}`;
+        }).join('\n') + '\n';
+
+        wsConn.send(JSON.stringify({
+          type: 'transcript',
+          text: '',
+          is_final: true,
+          speaker: null,
+          fullTranscript: transcriptBuffer
+        }));
+      }
+    } catch (e) {
+      log('❌', `[Cliente ${cId}] Error detectando roles:`, e.message);
+    }
+    roleDetectionPending = false;
+  }
 
   // Función para iniciar conexión con Deepgram
   const startDeepgram = async () => {
@@ -123,12 +184,21 @@ wss.on('connection', (ws, req) => {
         }, 3000);
       });
 
-      // Evento principal de transcripcion
+      // Contador de Results para debug
+      let resultsCount = 0;
+
+      // Evento principal de transcripcion (DIARIZE + AI role detection)
       connection.on('Results', (data) => {
+        resultsCount++;
         const transcript = data.channel?.alternatives?.[0]?.transcript;
         const words = data.channel?.alternatives?.[0]?.words || [];
         const isFinal = data.is_final;
         const speechFinal = data.speech_final;
+
+        // Log cada 20 Results para saber que la conexión sigue viva
+        if (resultsCount <= 3 || resultsCount % 20 === 0) {
+          log('🔄', `[Cliente ${clientId}] Results #${resultsCount}: "${(transcript || '').substring(0, 30)}" final:${isFinal} speech_final:${speechFinal}`);
+        }
 
         // Speaker: solo confiable en is_final
         let speaker = null;
@@ -147,30 +217,33 @@ wss.on('connection', (ws, req) => {
 
         if (transcript) {
           if (isFinal) {
-            // Acumular en el utterance actual
             currentUtterance += transcript + ' ';
             if (speaker !== null) currentSpeaker = speaker;
-
             log('📝', `[Cliente ${clientId}] [Final] Speaker ${speaker}: "${transcript.substring(0, 50)}"`);
           }
 
-          // Si es speech_final o si es final con speaker, agregar al buffer formateado
           if (speechFinal && currentUtterance.trim()) {
             const label = speakerLabels[currentSpeaker] || `Persona ${currentSpeaker !== null ? currentSpeaker + 1 : '?'}`;
             transcriptBuffer += `${label}: ${currentUtterance.trim()}\n`;
             log('📝', `[Cliente ${clientId}] [Utterance] ${label}: "${currentUtterance.trim().substring(0, 60)}"`);
             log('📝', `[Cliente ${clientId}] Buffer total: ${transcriptBuffer.length} chars`);
+
+            // Guardar para detección de roles con IA
+            if (!rolesDetected && currentSpeaker !== null) {
+              rawUtterances.push({ speaker: currentSpeaker, text: currentUtterance.trim() });
+              triggerRoleDetection(ws, clientId);
+            }
+
             currentUtterance = '';
             currentSpeaker = null;
           }
 
-          // Enviar al cliente (extension) para mostrar en UI
           ws.send(JSON.stringify({
             type: 'transcript',
             text: transcript,
             is_final: isFinal,
             speech_final: speechFinal,
-            speaker: isFinal ? speaker : null,  // Solo speaker en final
+            speaker: isFinal ? speaker : null,
             fullTranscript: transcriptBuffer
           }));
 
@@ -182,11 +255,16 @@ wss.on('connection', (ws, req) => {
 
       connection.on('UtteranceEnd', (data) => {
         log('📝', `[Cliente ${clientId}] [UtteranceEnd]`);
-        // Si queda utterance pendiente sin speech_final, flush it
         if (currentUtterance.trim()) {
           const label = speakerLabels[currentSpeaker] || 'Desconocido';
           transcriptBuffer += `${label}: ${currentUtterance.trim()}\n`;
           log('📝', `[Cliente ${clientId}] [Flush] ${label}: "${currentUtterance.trim().substring(0, 60)}"`);
+
+          if (!rolesDetected && currentSpeaker !== null) {
+            rawUtterances.push({ speaker: currentSpeaker, text: currentUtterance.trim() });
+            triggerRoleDetection(ws, clientId);
+          }
+
           currentUtterance = '';
           currentSpeaker = null;
         }
